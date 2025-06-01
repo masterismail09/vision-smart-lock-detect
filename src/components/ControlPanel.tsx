@@ -61,11 +61,12 @@ const ControlPanel = ({
         </div>
 
         <div className="bg-gray-700 p-3 rounded-lg">
-          <h4 className="text-sm font-medium text-gray-300 mb-2">ESP32 Config</h4>
+          <h4 className="text-sm font-medium text-gray-300 mb-2">Configuration</h4>
           <div className="text-xs text-gray-400 space-y-1">
-            <div>IP: 192.168.135.247</div>
-            <div>Endpoint: /capture</div>
+            <div>ESP32: 192.168.135.247</div>
+            <div>Workspace: yoyo</div>
             <div>Model: locket v2</div>
+            <div>API: Roboflow</div>
           </div>
         </div>
       </CardContent>

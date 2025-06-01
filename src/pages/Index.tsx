@@ -36,6 +36,10 @@ const Index = () => {
   // ESP32 and Roboflow configuration
   const ESP32_BASE_URL = "http://192.168.135.247";
   const CAPTURE_ENDPOINT = "/capture";
+  const ROBOFLOW_API_KEY = "1cDbsPHUkHhSTGSCAUrn";
+  const WORKSPACE_ID = "yoyo";
+  const PROJECT_ID = "locket";
+  const MODEL_VERSION = 2;
 
   useEffect(() => {
     // Calculate FPS
@@ -54,19 +58,59 @@ const Index = () => {
     };
   }, []);
 
+  const runRoboflowDetection = async (imageBlob: Blob): Promise<Detection[]> => {
+    try {
+      const formData = new FormData();
+      formData.append('file', imageBlob);
+
+      const roboflowUrl = `https://detect.roboflow.com/${PROJECT_ID}/${MODEL_VERSION}?api_key=${ROBOFLOW_API_KEY}&confidence=${confidence}&overlap=${overlap}`;
+      
+      const response = await fetch(roboflowUrl, {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error(`Roboflow API error: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('Roboflow response:', result);
+
+      // Convert Roboflow predictions to our Detection format
+      const detections: Detection[] = (result.predictions || []).map((pred: any) => ({
+        class: pred.class,
+        confidence: pred.confidence * 100, // Convert to percentage
+        x: pred.x,
+        y: pred.y,
+        width: pred.width,
+        height: pred.height
+      }));
+
+      return detections;
+    } catch (error) {
+      console.error('Roboflow detection error:', error);
+      return [];
+    }
+  };
+
   const captureFrame = async () => {
     try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
       const response = await fetch(`${ESP32_BASE_URL}${CAPTURE_ENDPOINT}`, {
         method: 'GET',
-        timeout: 10000
+        signal: controller.signal
       });
+
+      clearTimeout(timeoutId);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
 
       const blob = await response.blob();
-      const imageUrl = URL.createObjectURL(blob);
       
       // Update canvas with new frame
       if (canvasRef.current) {
@@ -74,7 +118,26 @@ const Index = () => {
         const ctx = canvas.getContext('2d');
         const img = new Image();
         
-        img.onload = () => {
+        img.onload = async () => {
+          canvas.width = img.width;
+          canvas.height = img.height;
+          ctx?.drawImage(img, 0, 0);
+          
+          setFrameCount(prev => prev + 1);
+          lastFrameTime.current = Date.now();
+          setIsConnected(true);
+          setError(null);
+
+          // Run Roboflow detection on the captured frame
+          const detectedObjects = await runRoboflowDetection(blob);
+          setDetections(detectedObjects);
+        };
+        
+        const imageUrl = URL.createObjectURL(blob);
+        img.src = imageUrl;
+        
+        // Clean up the URL after setting it
+        img.onload = async () => {
           canvas.width = img.width;
           canvas.height = img.height;
           ctx?.drawImage(img, 0, 0);
@@ -84,44 +147,24 @@ const Index = () => {
           lastFrameTime.current = Date.now();
           setIsConnected(true);
           setError(null);
-        };
-        
-        img.src = imageUrl;
-      }
 
-      // Simulate object detection (replace with actual Roboflow API call)
-      simulateDetection();
+          // Run Roboflow detection on the captured frame
+          const detectedObjects = await runRoboflowDetection(blob);
+          setDetections(detectedObjects);
+        };
+      }
 
     } catch (err) {
       console.error('Frame capture error:', err);
       setIsConnected(false);
-      setError(`Connection failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
-    }
-  };
-
-  const simulateDetection = () => {
-    // Simulate some detections for demo purposes
-    // In real implementation, you would call your Roboflow model here
-    const mockDetections: Detection[] = [
-      {
-        class: 'locket',
-        confidence: 85.5,
-        x: 320,
-        y: 240,
-        width: 100,
-        height: 80
-      },
-      {
-        class: 'locket',
-        confidence: 72.3,
-        x: 500,
-        y: 180,
-        width: 90,
-        height: 75
+      if (err instanceof Error && err.name === 'AbortError') {
+        setError('Connection timeout - ESP32 not responding');
+      } else {
+        setError(`Connection failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
       }
-    ].filter(() => Math.random() > 0.7); // Randomly show/hide detections
-
-    setDetections(mockDetections);
+      // Clear detections on error
+      setDetections([]);
+    }
   };
 
   const startDetection = () => {
@@ -131,7 +174,7 @@ const Index = () => {
     setFrameCount(0);
     setError(null);
     
-    intervalRef.current = setInterval(captureFrame, 200); // 5 FPS
+    intervalRef.current = setInterval(captureFrame, 500); // 2 FPS for live detection
   };
 
   const stopDetection = () => {
@@ -159,7 +202,7 @@ const Index = () => {
             <h1 className="text-3xl font-bold bg-gradient-to-r from-green-400 to-blue-500 bg-clip-text text-transparent">
               Live Object Detection
             </h1>
-            <p className="text-gray-400 mt-1">Real-time locket detection system</p>
+            <p className="text-gray-400 mt-1">Real-time locket detection with Roboflow AI</p>
           </div>
           
           <div className="flex items-center gap-4">
@@ -195,7 +238,7 @@ const Index = () => {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Camera className="h-5 w-5 text-green-400" />
-                  Live Feed
+                  Live Feed - Roboflow AI Detection
                   <Badge variant="outline" className="ml-auto">
                     {fps} FPS
                   </Badge>
@@ -215,6 +258,9 @@ const Index = () => {
                       <div className="text-center">
                         <Camera className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                         <p className="text-gray-400">Click Start Detection to begin</p>
+                        <p className="text-sm text-gray-500 mt-2">
+                          Using Roboflow '{PROJECT_ID}' model v{MODEL_VERSION}
+                        </p>
                       </div>
                     </div>
                   )}
