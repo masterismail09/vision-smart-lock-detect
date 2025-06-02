@@ -54,7 +54,7 @@ const Index = () => {
     'crayons': 5
   };
 
-  const COOLDOWN_PERIOD = 60000; // 1 minute in milliseconds
+  const COOLDOWN_PERIOD = 30000; // 30 seconds in milliseconds
 
   useEffect(() => {
     // Calculate FPS

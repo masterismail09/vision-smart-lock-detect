@@ -78,7 +78,7 @@ const ControlPanel = ({
           />
         </div>
         <p className="text-xs text-gray-500">
-          Activate speaker when objects are detected (1min cooldown)
+          Activate speaker when objects are detected (30sec cooldown)
         </p>
 
         <div className="bg-gray-700 p-3 rounded-lg">
