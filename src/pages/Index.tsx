@@ -1,9 +1,8 @@
-
 import { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Play, Pause, Settings, Wifi, WifiOff, Camera, AlertTriangle } from 'lucide-react';
+import { Play, Pause, Settings, Wifi, WifiOff, Camera, AlertTriangle, Volume2 } from 'lucide-react';
 import DetectionOverlay from '@/components/DetectionOverlay';
 import StatsPanel from '@/components/StatsPanel';
 import ControlPanel from '@/components/ControlPanel';
@@ -27,19 +26,35 @@ const Index = () => {
   const [error, setError] = useState<string | null>(null);
   const [confidence, setConfidence] = useState(40);
   const [overlap, setOverlap] = useState(30);
+  const [voiceCommandsEnabled, setVoiceCommandsEnabled] = useState(true);
+  const [lastVoiceCommand, setLastVoiceCommand] = useState<string | null>(null);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const fpsIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastFrameTime = useRef(Date.now());
+  const voiceCommandCooldown = useRef<Map<string, number>>(new Map());
 
   // ESP32 and Roboflow configuration
   const ESP32_BASE_URL = "http://192.168.135.247";
   const CAPTURE_ENDPOINT = "/capture";
+  const SPEAKER_BASE_URL = "http://192.168.135.80";
+  const PLAY_ENDPOINT = "/play";
   const ROBOFLOW_API_KEY = "1cDbsPHUkHhSTGSCAUrn";
   const WORKSPACE_ID = "yoyo";
   const PROJECT_ID = "locket";
   const MODEL_VERSION = 2;
+
+  // Voice command dictionary
+  const VOICE_COMMANDS: Record<string, number> = {
+    'blade': 1,
+    'cap': 2,
+    'toy-truck': 3,
+    'battery': 4,
+    'crayons': 5
+  };
+
+  const COOLDOWN_PERIOD = 60000; // 1 minute in milliseconds
 
   useEffect(() => {
     // Calculate FPS
@@ -57,6 +72,47 @@ const Index = () => {
       }
     };
   }, []);
+
+  const sendVoiceCommand = async (objectClass: string) => {
+    if (!voiceCommandsEnabled) return;
+
+    const commandNumber = VOICE_COMMANDS[objectClass];
+    if (!commandNumber) return;
+
+    const now = Date.now();
+    const lastCommand = voiceCommandCooldown.current.get(objectClass);
+    
+    // Check if we're still in cooldown period
+    if (lastCommand && (now - lastCommand) < COOLDOWN_PERIOD) {
+      console.log(`Voice command for ${objectClass} is in cooldown. ${Math.round((COOLDOWN_PERIOD - (now - lastCommand)) / 1000)}s remaining`);
+      return;
+    }
+
+    try {
+      console.log(`Sending voice command for ${objectClass}: ${commandNumber}`);
+      
+      const response = await fetch(`${SPEAKER_BASE_URL}${PLAY_ENDPOINT}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain'
+        },
+        body: commandNumber.toString()
+      });
+
+      if (response.ok) {
+        console.log(`✅ Voice command sent successfully for ${objectClass}`);
+        voiceCommandCooldown.current.set(objectClass, now);
+        setLastVoiceCommand(`${objectClass} (${commandNumber})`);
+        
+        // Clear the last command display after 3 seconds
+        setTimeout(() => setLastVoiceCommand(null), 3000);
+      } else {
+        console.error(`❌ Failed to send voice command: ${response.status}`);
+      }
+    } catch (error) {
+      console.error(`❌ Error sending voice command for ${objectClass}:`, error);
+    }
+  };
 
   const runRoboflowDetection = async (imageBlob: Blob): Promise<Detection[]> => {
     try {
@@ -86,6 +142,14 @@ const Index = () => {
         width: pred.width,
         height: pred.height
       }));
+
+      // Check for voice commands for detected objects
+      if (voiceCommandsEnabled && detections.length > 0) {
+        const uniqueClasses = new Set(detections.map(d => d.class));
+        uniqueClasses.forEach(objectClass => {
+          sendVoiceCommand(objectClass);
+        });
+      }
 
       return detections;
     } catch (error) {
@@ -202,11 +266,20 @@ const Index = () => {
             <h1 className="text-3xl font-bold bg-gradient-to-r from-green-400 to-blue-500 bg-clip-text text-transparent">
               Live Object Detection
             </h1>
-            <p className="text-gray-400 mt-1">Real-time locket detection with Roboflow AI</p>
+            <p className="text-gray-400 mt-1">Real-time locket detection with Roboflow AI & Voice Commands</p>
           </div>
           
           <div className="flex items-center gap-4">
             <StatusIndicator isConnected={isConnected} />
+            <Button
+              onClick={() => setVoiceCommandsEnabled(!voiceCommandsEnabled)}
+              variant={voiceCommandsEnabled ? "default" : "outline"}
+              size="sm"
+              className="flex items-center gap-2"
+            >
+              <Volume2 className="h-4 w-4" />
+              Voice {voiceCommandsEnabled ? 'ON' : 'OFF'}
+            </Button>
             <Button
               onClick={toggleDetection}
               variant={isRunning ? "destructive" : "default"}
@@ -218,6 +291,18 @@ const Index = () => {
             </Button>
           </div>
         </div>
+
+        {/* Voice Command Status */}
+        {lastVoiceCommand && (
+          <Card className="bg-blue-900/20 border-blue-500">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2 text-blue-400">
+                <Volume2 className="h-5 w-5" />
+                <span>Voice command sent: {lastVoiceCommand}</span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Error Alert */}
         {error && (
@@ -242,6 +327,11 @@ const Index = () => {
                   <Badge variant="outline" className="ml-auto">
                     {fps} FPS
                   </Badge>
+                  {voiceCommandsEnabled && (
+                    <Badge variant="outline" className="bg-blue-900/20 text-blue-400 border-blue-500">
+                      Voice ON
+                    </Badge>
+                  )}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -260,6 +350,9 @@ const Index = () => {
                         <p className="text-gray-400">Click Start Detection to begin</p>
                         <p className="text-sm text-gray-500 mt-2">
                           Using Roboflow '{PROJECT_ID}' model v{MODEL_VERSION}
+                        </p>
+                        <p className="text-sm text-gray-500 mt-1">
+                          Voice commands: {voiceCommandsEnabled ? 'Enabled' : 'Disabled'}
                         </p>
                       </div>
                     </div>
@@ -283,6 +376,8 @@ const Index = () => {
               overlap={overlap}
               onConfidenceChange={setConfidence}
               onOverlapChange={setOverlap}
+              voiceCommandsEnabled={voiceCommandsEnabled}
+              onVoiceCommandsChange={setVoiceCommandsEnabled}
             />
           </div>
         </div>
